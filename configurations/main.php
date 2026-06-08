@@ -13,9 +13,7 @@
     }
   }
 
-  require_once __DIR__ . '/../functions/database/database.php';
   $db2 = connectDatabase('DB2', PDO::ERRMODE_EXCEPTION);
-  
   $appStatus = checkAppStatus($db2) ?? [
     'parameter' => 'app_status',
     'value' => 'MAINTENANCE_MODE',
@@ -27,12 +25,12 @@
   $currentScriptDirectory = str_replace('\\', '/', dirname($currentScriptPath));
   $isMaintenancePage = checkForEquality(basename($currentScriptDirectory), 'maintenance', 'strict');
 
-  $logo_href = __DIR__ . '/../';
+  $logo_href = 'https://careerinstitute.co.in/';
   $logo_text = 'Career Institute';
 
   if (checkForEquality($appStatus['value'], 'MAINTENANCE_MODE', 'strict')) {
     if (!$isMaintenancePage) {
-      redirectTo(__DIR__ . '/../maintenance/', 0);
+      redirectTo('../maintenance/', 0);
     }
 
     if (!headers_sent()) {
@@ -42,6 +40,6 @@
     }
   }
   elseif ($isMaintenancePage) {
-    redirectTo(__DIR__ . '/../dashboard/', 0);
+    redirectTo('../dashboard/', 0);
   }
 ?>
