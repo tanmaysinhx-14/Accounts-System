@@ -192,8 +192,6 @@
   require_once '../components/breadcrumb.php';
 ?>
 
-<link rel="stylesheet" type="text/css" href="./approvals.css" />
-
 <section class="section-border border-primary">
   <div class="container-xxl d-flex flex-column">
     <div class="row gx-0 align-items-start justify-content-center min-vh-100">
@@ -362,16 +360,6 @@
 </dialog>
 
 <script type="text/javascript">
-  function openDialog(id)  { document.getElementById(id).showModal(); }
-  function closeDialog(id) { document.getElementById(id).close(); }
-
-  document.querySelectorAll('dialog.ci-dialog').forEach(function (dlg) {
-    dlg.addEventListener('click', function (e) {
-      const r = dlg.getBoundingClientRect();
-      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dlg.close();
-    });
-  });
-
   function openDeleteApprovalDialog(btn) {
     const { email, name } = btn.dataset;
     document.getElementById('deleteApprovalEmail').value          = email;
@@ -379,33 +367,16 @@
     openDialog('deleteApprovalDialog');
   }
 
-  (function () {
-    const input      = document.getElementById('approvalSearchInput');
-    const noResults  = document.getElementById('noApprovalResults');
-    const badge      = document.getElementById('approvalCountBadge');
-    const total      = <?php echo count($approvalRecords); ?>;
-
-    if (!input) return;
-
-    input.addEventListener('input', function () {
-      const query = this.value.trim().toLowerCase();
-      const rows  = document.querySelectorAll('#approvalTableBody tr');
-      let visible = 0;
-
-      rows.forEach(function (row) {
-        const match = !query
-          || row.dataset.searchEmail.includes(query)
-          || row.dataset.searchName.includes(query);
-        row.classList.toggle('d-none', !match);
-        if (match) visible++;
-      });
-
-      noResults.classList.toggle('d-none', visible > 0);
-      badge.textContent = query
-        ? visible + ' of ' + total + ' Pending'
-        : total + ' Pending';
-    });
-  })();
+  initLiveSearch({
+    inputId:      'approvalSearchInput',
+    tableBodyId:  'approvalTableBody',
+    noResultsId:  'noApprovalResults',
+    badgeId:      'approvalCountBadge',
+    total:        <?php echo count($approvalRecords); ?>,
+    searchAttrs:  ['searchEmail', 'searchName'],
+    singularLabel: 'Pending',
+    pluralLabel:   'Pending',
+  });
 </script>
 
 <?php require_once '../components/footer.php'; ?>

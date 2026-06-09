@@ -1242,14 +1242,6 @@
     'faculty_has_opted_email_communication'
   ]);
 
-  function openDialog(id) {
-    document.getElementById(id).showModal();
-  }
-
-  function closeDialog(id) {
-    document.getElementById(id).close();
-  }
-
   function parseRecord(btn) {
     return JSON.parse(btn.dataset.record || '{}');
   }
@@ -1286,15 +1278,6 @@
     if (booleanRecordKeys.has(key) && String(value) === '0') return 'No';
     return String(value);
   }
-
-  document.querySelectorAll('dialog.ci-dialog').forEach(function (dlg) {
-    dlg.addEventListener('click', function (e) {
-      const rect = dlg.getBoundingClientRect();
-      if (e.clientX < rect.left || e.clientX > rect.right || e.clientY < rect.top || e.clientY > rect.bottom) {
-        dlg.close();
-      }
-    });
-  });
 
   function openViewRecordDialog(btn) {
     const record = parseRecord(btn);
@@ -1375,35 +1358,14 @@
     openDialog('deleteFacultyDialog');
   }
 
-  (function () {
-    const input = document.getElementById('recordSearchInput');
-    const noResults = document.getElementById('noRecordResults');
-    const badge = document.getElementById('recordCountBadge');
-    const total = <?php echo count($fetchedRecords); ?>;
-
-    if (!input) return;
-
-    input.addEventListener('input', function () {
-      const query = this.value.trim().toLowerCase();
-      const rows = document.querySelectorAll('#recordTableBody tr');
-      let visible = 0;
-
-      rows.forEach(function (row) {
-        const match = !query
-          || row.dataset.searchName.includes(query)
-          || row.dataset.searchEmail.includes(query)
-          || row.dataset.searchUsercode.includes(query);
-
-        row.classList.toggle('d-none', !match);
-        if (match) visible++;
-      });
-
-      noResults.classList.toggle('d-none', visible > 0);
-      badge.textContent = query
-        ? visible + ' of ' + total + ' Records'
-        : total + ' Records';
-    });
-  })();
+  initLiveSearch({
+    inputId:      'recordSearchInput',
+    tableBodyId:  'recordTableBody',
+    noResultsId:  'noRecordResults',
+    badgeId:      'recordCountBadge',
+    total:        <?php echo count($fetchedRecords); ?>,
+    searchAttrs:  ['searchName', 'searchEmail', 'searchUsercode'],
+  });
 </script>
 
 <?php require_once '../components/footer.php'; ?>

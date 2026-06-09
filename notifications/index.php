@@ -482,8 +482,6 @@
   </div>
 </section>
 
-<link rel="stylesheet" type="text/css" href="notifications.css">
-
 <!-- EDIT DIALOG -->
 <dialog class="ci-dialog" id="editNotifDialog" aria-labelledby="editNotifDialogTitle">
   <form method="POST" action="./">
@@ -585,16 +583,6 @@
 </dialog>
 
 <script>
-  function openDialog(id)  { document.getElementById(id).showModal(); }
-  function closeDialog(id) { document.getElementById(id).close(); }
-
-  document.querySelectorAll('dialog.ci-dialog').forEach(function (dlg) {
-    dlg.addEventListener('click', function (e) {
-      const r = dlg.getBoundingClientRect();
-      if (e.clientX < r.left || e.clientX > r.right || e.clientY < r.top || e.clientY > r.bottom) dlg.close();
-    });
-  });
-
   function toggleBatchSection(role, prefix) {
     const section = document.getElementById(prefix + '_batch_section');
     if (!section) return;
@@ -634,31 +622,16 @@
     openDialog('deleteNotifDialog');
   }
 
-  (function () {
-    const input        = document.getElementById('notifSearchInput');
-    const noResults    = document.getElementById('noSearchResults');
-    const countBadge   = document.getElementById('notifCountBadge');
-    const total        = <?php echo count($notificationRecords); ?>;
-
-    if (!input) return;
-
-    input.addEventListener('input', function () {
-      const query   = this.value.trim().toLowerCase();
-      const rows    = document.querySelectorAll('#notifTableBody tr');
-      let   visible = 0;
-
-      rows.forEach(function (row) {
-        const show = !query || row.dataset.searchHeading.includes(query) || row.dataset.searchSub.includes(query);
-        row.classList.toggle('d-none', !show);
-        if (show) visible++;
-      });
-
-      noResults.classList.toggle('d-none', visible > 0);
-      countBadge.textContent = query
-        ? visible + ' of ' + total + (total === 1 ? ' Record' : ' Records')
-        : total + (total === 1 ? ' Record' : ' Records');
-    });
-  })();
+  initLiveSearch({
+    inputId:      'notifSearchInput',
+    tableBodyId:  'notifTableBody',
+    noResultsId:  'noSearchResults',
+    badgeId:      'notifCountBadge',
+    total:        <?php echo count($notificationRecords); ?>,
+    searchAttrs:  ['searchHeading', 'searchSub'],
+    singularLabel: 'Record',
+    pluralLabel:   'Records',
+  });
 </script>
 
 <?php require_once '../components/footer.php'; ?>
