@@ -196,7 +196,7 @@
 
 <section class="section-border border-primary">
   <div class="container-xxl d-flex flex-column">
-    <div class="row align-items-start justify-content-center min-vh-100 gx-0">
+    <div class="row gx-0 align-items-start justify-content-center min-vh-100">
       <div class="col-12 px-8 py-8">
 
         <div class="mb-6">

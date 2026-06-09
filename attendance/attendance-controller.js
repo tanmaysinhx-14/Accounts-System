@@ -14,8 +14,8 @@
     currentYear: initialYear
   } = window.ATTENDANCE_CONFIG;
 
-  const attendanceMap = {};
-  attendanceDates.forEach(d => attendanceMap[d] = true);
+  const attendanceMap = Object.create(null);
+  for (const d of attendanceDates) attendanceMap[d] = 1;
 
   let currentMonth = initialMonth;
   let currentYear = initialYear;
@@ -26,7 +26,7 @@
   function renderCalendar(month, year) {
     grid.innerHTML = '';
     title.textContent = new Date(year, month - 1)
-      .toLocaleString('default', { month: 'long', year: 'numeric' });
+      .toLocaleString('en-IN', { month: 'long', year: 'numeric' });
 
     const weekdays = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
     weekdays.forEach(d => {

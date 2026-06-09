@@ -34,7 +34,7 @@
         $STMT_retrieveAttendance->bindValue(':batch_code', $selectedBatch, PDO::PARAM_STR);
         $STMT_retrieveAttendance->execute();
         foreach ($STMT_retrieveAttendance->fetchAll(PDO::FETCH_ASSOC) as $row) {
-          $key = date('Y-d-m', strtotime((string)$row['attendance_timestamp']));
+          $key = date('Y-m-d', strtotime($row['attendance_timestamp']));
           $batchAttendance[$key] = [
             'id'        => (int)$row['attendance_id'],
             'usercodes' => json_decode((string)$row['attendance_value'], true) ?? [],
@@ -53,7 +53,7 @@
         $postBatch           = escapeOutput($_POST['attendance_batch'] ?? '');
         $postDate            = escapeOutput($_POST['attendance_date']  ?? '');
         $presentStudentCodes = array_values(array_map('strval', (array)($_POST['present_students'] ?? [])));
-        $selectedTimestamp   = strtotime((string)$postDate);
+        $selectedTimestamp   = strtotime($postDate . ' 00:00:00');
 
         if (!$selectedTimestamp || !$postBatch) {
           setToast('Invalid batch or date.', 'danger', 5000);
@@ -61,8 +61,12 @@
         else {
           $checkAttendanceRecordPresence = false;
           try {
-            $checkAttendanceRecord = $db2->prepare("SELECT attendance_id FROM attendance_records WHERE attendance_batch_code = :batch_code AND `attendance_timestamp` LIKE :date_pattern LIMIT 1");
-            $checkAttendanceRecord->execute([':batch_code' => $postBatch, ':date_pattern' => date('d/m/Y', $selectedTimestamp) . '%']);
+            $checkAttendanceRecord = $db2->prepare("SELECT attendance_id FROM attendance_records WHERE attendance_batch_code = :batch_code AND DATE(attendance_timestamp) = :date LIMIT 1");
+
+            $checkAttendanceRecord->execute([
+              ':batch_code' => $postBatch,
+              ':date' => date('Y-m-d', $selectedTimestamp)
+            ]);
             $checkAttendanceRecordPresence = $checkAttendanceRecord->fetchColumn();
           } 
           catch (PDOException) {}
@@ -71,9 +75,7 @@
             setToast('Attendance for this date already exists. Use Edit instead.', 'warning', 6000);
           } 
           else {
-            date_default_timezone_set('Asia/Kolkata');
-
-            $formattedSelectedTimestamp = date('d/m/Y', $selectedTimestamp) . ' ' . date('H:i:s');
+            $formattedSelectedTimestamp = formatTimestampForStorage($selectedTimestamp);
             $attendanceValues           = json_encode($presentStudentCodes);
 
             $currentAttemptForUploadingAttendanceRecord   = 0;
@@ -111,7 +113,7 @@
         $postBatch           = escapeOutput($_POST['attendance_batch'] ?? '');
         $postId              = (int)($_POST['attendance_id'] ?? 0);
         $presentStudentCodes = array_values(array_map('strval', (array)($_POST['present_students'] ?? [])));
-        $attendanceValues   = json_encode($presentStudentCodes);
+        $attendanceValues    = json_encode($presentStudentCodes);
         $currentAttemptForUpdatingAttendanceRecord = 0;
         while ($currentAttemptForUpdatingAttendanceRecord < 3) {
           try {
@@ -173,8 +175,8 @@
     $year  = (int)date('Y');
 
     try {
-      $STMT_getStudentBatch = $db1->prepare('SELECT student_batch_details FROM student_details WHERE student_usercode = :uc LIMIT 1');
-      $STMT_getStudentBatch->bindValue(':uc', $_SESSION['usercode'], PDO::PARAM_STR);
+      $STMT_getStudentBatch = $db1->prepare('SELECT student_batch_details FROM student_details WHERE student_usercode = :usercode LIMIT 1');
+      $STMT_getStudentBatch->bindValue(':usercode', $_SESSION['usercode'], PDO::PARAM_STR);
       $STMT_getStudentBatch->execute();
       $studentBatch = $STMT_getStudentBatch->fetchColumn();
 
@@ -183,18 +185,24 @@
         $STMT_getAttendanceRecords->bindValue(':batch_code', $studentBatch, PDO::PARAM_STR);
         $STMT_getAttendanceRecords->execute();
 
-        foreach ($STMT_getAttendanceRecords->fetchAll(PDO::FETCH_ASSOC) as $row) {
-          $key = date('Y-d-m', strtotime((string)$row['attendance_timestamp']));
+        foreach($STMT_getAttendanceRecords->fetchAll(PDO::FETCH_ASSOC) as $row) {
+          $key = date('Y-m-d', strtotime($row['attendance_timestamp']));
           $ucs = json_decode((string)$row['attendance_value'], true) ?? [];
           if (in_array($_SESSION['usercode'], $ucs, true)) {
-            $attendanceByDate[$key] = true;
-            [$y, $m] = explode('-', $key);
-            $y = (int)$y; $m = (int)$m;
+            $dt = parseStoredTimestamp($row['attendance_timestamp']);
+            $timestamp = $dt ? $dt->getTimestamp() : null;
+
+            $y = (int)date('Y', $timestamp);
+            $m = (int)date('n', $timestamp);
             if (!isset($attendanceStats[$y])) {
               $attendanceStats[$y] = ['yearTotal' => 0, 'months' => array_fill(1, 12, 0)];
             }
-            $attendanceStats[$y]['yearTotal']++;
-            $attendanceStats[$y]['months'][$m]++;
+            if (!isset($attendanceByDate[$key])) {
+              $attendanceByDate[$key] = true;
+
+              $attendanceStats[$y]['yearTotal']++;
+              $attendanceStats[$y]['months'][$m]++;
+            }
           }
         }
       }
@@ -221,15 +229,17 @@
 <?php if (checkForEquality(getUserRoleUsingUsercode($_SESSION['usercode']), 'admin', 'strict')): // For Admins ?>
   <section class="section-border border-primary">
     <div class="container-xxl d-flex flex-column">
-      <div class="row align-items-start justify-content-center gx-0 min-vh-100">
+      <div class="row gx-0 align-items-start justify-content-center min-vh-100">
         <div class="col-12 px-8 py-8">
-          <?php if (checkForEquality($selectedBatch, null, 'strict')): ?>
 
+          <?php if (checkForEquality($selectedBatch, null, 'strict')): ?>
             <h2 class="fw-bold mb-1">Save Attendance</h2>
             <p class="text-body-secondary mb-6">Select a batch to manage attendance records.</p>
 
             <?php if (empty($activeBatchList)): ?>
               <div class="alert alert-light border">No active batches configured. Set them up in Batch Manager first.</div>
+
+            <!-- ATTENDANCE BATCH SELECTOR -->
             <?php else: ?>
               <form method="GET" action="./" class="row g-3 align-items-end" style="max-width: 520px;">
                 <div class="col">
@@ -247,10 +257,11 @@
                   <button type="submit" class="btn btn-primary rounded-pill px-4">Continue</button>
                 </div>
               </form>
+
             <?php endif; ?>
 
           <?php else: ?>
-            <div class="d-flex align-items-center justify-content-between flex-wrap gap-3 mb-6">
+            <div class="d-flex align-items-center justify-content-between flex-wrap mb-6">
               <div>
                 <h2 class="fw-bold mb-1">
                   Attendance &mdash;
@@ -258,7 +269,7 @@
                 </h2>
                 <p class="text-body-secondary mb-0">Click any date to create or manage its attendance record.</p>
               </div>
-              <a href="./" class="btn btn-outline-secondary rounded-pill px-4">Change Batch</a>
+              <a href="./" class="btn btn-secondary rounded-pill px-4">Change Batch</a>
             </div>
 
             <?php if (empty($studentsInBatch)): ?>
@@ -267,18 +278,50 @@
 
               <div class="mx-auto" style="max-width: 400px;">
                 <div class="d-flex align-items-center justify-content-between mb-3">
-                  <button type="button" class="btn btn-sm btn-outline-secondary px-3" id="prevMonth">&#8592;</button>
-                  <strong id="calTitle" class="fs-6 text-center"></strong>
-                  <button type="button" class="btn btn-sm btn-outline-secondary px-3" id="nextMonth">&#8594;</button>
+                  <button type="button" class="btn btn-sm btn-secondary px-3" id="prevMonth">
+                    <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <g id="SVGRepo_bgCarrier" stroke-width="0"></g>
+                      <g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g>
+                      <g id="SVGRepo_iconCarrier"> 
+                        <path d="M6 12H18M6 12L11 7M6 12L11 17" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path> 
+                      </g>
+                    </svg>
+                  </button>
+                  <p id="calTitle" class="fs-lg fw-bolder text-center"></p>
+                  <button type="button" class="btn btn-sm btn-secondary px-3" id="nextMonth">
+                    <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                      <g id="SVGRepo_bgCarrier" stroke-width="0"></g>
+                      <g id="SVGRepo_tracerCarrier" stroke-linecap="round" stroke-linejoin="round"></g>
+                      <g id="SVGRepo_iconCarrier"> 
+                        <path d="M6 12H18M18 12L13 7M18 12L13 17" stroke="#ffffff" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"></path> 
+                      </g>
+                    </svg>
+                  </button>
                 </div>
                 <div class="att-grid" id="calGrid"></div>
                 <div class="mt-3 d-flex gap-4 fs-sm text-body-secondary">
-                  <span><span style="display:inline-block;width:12px;height:12px;background:#d1fae5;border-radius:2px;vertical-align:middle;margin-right:4px;"></span>Has record</span>
-                  <span><span style="display:inline-block;width:12px;height:12px;background:#e9ecef;border-radius:2px;vertical-align:middle;margin-right:4px;"></span>No record</span>
+                  <span>
+                    <span class="d-inline-block rounded-1 me-1" 
+                          style="width:15px;
+                                 height:15px;
+                                 background:#d1fae5;
+                                 position:relative;
+                                 top: 3px;"></span>
+                    Has record
+                  </span>
+                  <span>
+                    <span class="d-inline-block rounded-1 me-1" 
+                          style="width:15px;
+                                 height:15px;
+                                 background:#e9ecef;
+                                 position:relative;
+                                 top: 3px;"></span>
+                    No record
+                  </span>
                 </div>
               </div>
 
-              <!-- Attendance Dialog (create / edit) -->
+              <!-- Attendance Dialog (Create / Edit) -->
               <dialog class="ci-dialog" id="attendanceDialog" aria-labelledby="attendanceDialogTitle">
                 <form method="POST" action="./?batch=<?= rawurlencode($selectedBatch); ?>" id="attendanceForm">
                   <div class="ci-dialog__header">
@@ -297,8 +340,8 @@
                     <div class="d-flex align-items-center justify-content-between mb-2">
                       <label class="fw-semibold fs-sm">Students Present</label>
                       <div class="d-flex gap-2">
-                        <button type="button" class="btn btn-xs btn-outline-success rounded-pill px-2 py-0" onclick="toggleAll(true)">All Present</button>
-                        <button type="button" class="btn btn-xs btn-outline-danger  rounded-pill px-2 py-0" onclick="toggleAll(false)">All Absent</button>
+                        <button type="button" class="btn btn-xs btn-success rounded-pill px-2 py-0" onclick="toggleAll(true)">All Present</button>
+                        <button type="button" class="btn btn-xs btn-danger  rounded-pill px-2 py-0" onclick="toggleAll(false)">All Absent</button>
                       </div>
                     </div>
                     <div id="studentChecklist"
@@ -309,7 +352,7 @@
                 </form>
               </dialog>
 
-              <!-- Delete Confirm Dialog -->
+              <!-- Attendance Dialog (Delete Confirmation) -->
               <dialog class="ci-dialog ci-dialog--sm" id="deleteConfirmDialog" aria-labelledby="deleteConfirmTitle">
                 <form method="POST" action="./?batch=<?= rawurlencode($selectedBatch); ?>">
                   <div class="ci-dialog__header">
@@ -328,8 +371,8 @@
                     <input type="hidden" name="csrf_token"       value="<?= $csrfToken; ?>">
                   </div>
                   <div class="ci-dialog__footer">
-                    <button type="button"  class="btn btn-outline-secondary rounded-pill px-4" onclick="closeDialog('deleteConfirmDialog')">Cancel</button>
-                    <button type="submit"  name="deleteAttendance" class="btn btn-danger rounded-pill px-4">Delete</button>
+                    <button type="button"  class="btn btn-outline-secondary rounded-pill px-4 py-1" onclick="closeDialog('deleteConfirmDialog')">Cancel</button>
+                    <button type="submit"  name="deleteAttendance" class="btn btn-danger rounded-pill px-4 py-1">Delete</button>
                   </div>
                 </form>
               </dialog>
@@ -342,41 +385,6 @@
     </div>
   </section>
 
-<?php elseif (checkForEquality(getUserRoleUsingUsercode($_SESSION['usercode']), 'student', 'strict')): // For Students ?>
-  <section class="section-border border-primary min-vh-100 d-flex align-items-center">
-    <div class="container-xl">
-      <div class="row justify-content-center">
-        <div class="col-12 col-lg-9 py-8">
-          <div class="mx-auto my-10 ff-inter" style="max-width: 40rem;">
-            <div class="d-flex row align-items-center mb-3 text-center">
-              <button type="button" class="col-auto btn btn-xs btn-light btn-outline-light" id="prevMonth">
-                <svg width="20px" height="20px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path fill-rule="evenodd" clip-rule="evenodd" d="M10.5303 5.46967C10.8232 5.76256 10.8232 6.23744 10.5303 6.53033L5.81066 11.25H20C20.4142 11.25 20.75 11.5858 20.75 12C20.75 12.4142 20.4142 12.75 20 12.75H5.81066L10.5303 17.4697C10.8232 17.7626 10.8232 18.2374 10.5303 18.5303C10.2374 18.8232 9.76256 18.8232 9.46967 18.5303L3.46967 12.5303C3.17678 12.2374 3.17678 11.7626 3.46967 11.4697L9.46967 5.46967C9.76256 5.17678 10.2374 5.17678 10.5303 5.46967Z" fill="#1C274C"/>
-                </svg>
-              </button>
-              <div class="col fw-bold" id="calendarTitle"></div>
-              <button type="button" class="col-auto btn btn-xs border border-primary" id="nextMonth">
-                <svg width="20px" height="20px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
-                  <path fill-rule="evenodd" clip-rule="evenodd" d="M13.4697 5.46967C13.7626 5.17678 14.2374 5.17678 14.5303 5.46967L20.5303 11.4697C20.8232 11.7626 20.8232 12.2374 20.5303 12.5303L14.5303 18.5303C14.2374 18.8232 13.7626 18.8232 13.4697 18.5303C13.1768 18.2374 13.1768 17.7626 13.4697 17.4697L18.1893 12.75H4C3.58579 12.75 3.25 12.4142 3.25 12C3.25 11.5858 3.58579 11.25 4 11.25H18.1893L13.4697 6.53033C13.1768 6.23744 13.1768 5.76256 13.4697 5.46967Z" fill="#1C274C"/>
-                </svg>
-              </button>
-            </div>
-            <div class="calendar-grid mb-10" id="calendarGrid"></div>
-            <div id="calendar-data">
-              <p class="my-1">Days present this year (<?= date('Y'); ?>): <strong id="yearTotal"></strong> days</p>
-              <p class="my-1">Days present this month (<?= date('F') . ', ' . date('Y'); ?>): <strong id="monthTotal"></strong> days</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  </section>
-
-<?php endif; ?>
-
-
-<!-- JAVASCRIPTS FOR ATTENDANCE -->
-<?php if(checkForEquality(getUserRoleUsingUsercode($_SESSION['usercode']), 'admin', 'strict')): // JS for Admins ?>
   <script type="text/javascript">
     const BATCH_STUDENTS   = <?= json_encode(array_values($studentsInBatch), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
     const BATCH_ATTENDANCE = <?= json_encode($batchAttendance,               JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP); ?>;
@@ -462,16 +470,16 @@
       const footer = document.getElementById('attendanceDialogFooter');
       if (isEdit) {
         footer.innerHTML =
-          `<button type="button" class="btn btn-outline-danger rounded-pill px-3 me-auto"
+          `<button type="button" class="btn btn-outline-danger rounded-pill px-4 py-1 me-auto"
                     onclick="openDeleteConfirm('${esc(dateKey)}', ${rec.id})">Delete Record</button>
-            <button type="button" class="btn btn-outline-secondary rounded-pill px-3"
+            <button type="button" class="btn btn-outline-secondary rounded-pill px-4 py-1"
                     onclick="closeDialog('attendanceDialog')">Cancel</button>
-            <button type="submit" name="updateAttendance" class="btn btn-primary rounded-pill px-4">Update</button>`;
+            <button type="submit" name="updateAttendance" class="btn btn-primary rounded-pill px-4 py-1">Update</button>`;
       } else {
         footer.innerHTML =
-          `<button type="button" class="btn btn-outline-secondary rounded-pill px-3"
+          `<button type="button" class="btn btn-outline-secondary rounded-pill px-4 py-1"
                     onclick="closeDialog('attendanceDialog')">Cancel</button>
-            <button type="submit" name="createAttendance" class="btn btn-success rounded-pill px-4">Create Record</button>`;
+            <button type="submit" name="createAttendance" class="btn btn-primary rounded-pill px-4 py-1">Create Record</button>`;
       }
 
       document.getElementById('attendanceDialog').showModal();
@@ -518,7 +526,36 @@
     renderCalendar(curMonth, curYear);
   </script>
 
-<?php elseif(checkForEquality(getUserRoleUsingUsercode($_SESSION['usercode']), 'student', 'strict')): // JS for Students ?>
+<?php elseif (checkForEquality(getUserRoleUsingUsercode($_SESSION['usercode']), 'student', 'strict')): // For Students ?>
+  <section class="section-border border-primary">
+    <div class="container-xxl d-flex flex-column">
+      <div class="row gx-0 align-items-start justify-content-center min-vh-100">
+        <div class="col-12 col-xl-8 px-8 py-8" style="max-width: 40rem;">
+          <div class="d-flex row align-items-center mb-3 text-center">
+            <button type="button" class="col-auto btn btn-xs btn-secondary" id="prevMonth">
+              <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path fill-rule="evenodd" clip-rule="evenodd" d="M10.5303 5.46967C10.8232 5.76256 10.8232 6.23744 10.5303 6.53033L5.81066 11.25H20C20.4142 11.25 20.75 11.5858 20.75 12C20.75 12.4142 20.4142 12.75 20 12.75H5.81066L10.5303 17.4697C10.8232 17.7626 10.8232 18.2374 10.5303 18.5303C10.2374 18.8232 9.76256 18.8232 9.46967 18.5303L3.46967 12.5303C3.17678 12.2374 3.17678 11.7626 3.46967 11.4697L9.46967 5.46967C9.76256 5.17678 10.2374 5.17678 10.5303 5.46967Z" fill="#ffffff"/>
+              </svg>
+            </button>
+            <strong class="col" id="calendarTitle"></strong>
+            <button type="button" class="col-auto btn btn-xs btn-secondary" id="nextMonth">
+              <svg width="24px" height="24px" viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <path fill-rule="evenodd" clip-rule="evenodd" d="M13.4697 5.46967C13.7626 5.17678 14.2374 5.17678 14.5303 5.46967L20.5303 11.4697C20.8232 11.7626 20.8232 12.2374 20.5303 12.5303L14.5303 18.5303C14.2374 18.8232 13.7626 18.8232 13.4697 18.5303C13.1768 18.2374 13.1768 17.7626 13.4697 17.4697L18.1893 12.75H4C3.58579 12.75 3.25 12.4142 3.25 12C3.25 11.5858 3.58579 11.25 4 11.25H18.1893L13.4697 6.53033C13.1768 6.23744 13.1768 5.76256 13.4697 5.46967Z" fill="#ffffff"/>
+              </svg>
+            </button>
+          </div>
+          <div class="calendar-grid mb-10" id="calendarGrid"></div>
+        </div>
+        <div class="d-flex flex-column col-12 col-xl-4 px-8 py-8">
+          <div id="row align-items-center justify-content-center calendar-data">
+            <p class="my-1">Days present this year (<?= date('Y'); ?>): <strong id="yearTotal"></strong> days</p>
+            <p class="my-1">Days present this month (<?= date('F') . ', ' . date('Y'); ?>): <strong id="monthTotal"></strong> days</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
   <script type="text/javascript">
     window.ATTENDANCE_CONFIG = {
       attendanceDates: <?= json_encode(array_keys($attendanceByDate)); ?>,
